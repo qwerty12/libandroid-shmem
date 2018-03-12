@@ -1,22 +1,44 @@
-#include <android/log.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #include <paths.h>
 
 #define __u32 uint32_t
+
+#ifdef __ANDROID__
+#include <android/log.h>
 #include <linux/ashmem.h>
+
+#define DBG(...) __android_log_print(ANDROID_LOG_INFO, "shmem", __VA_ARGS__)
+#else
+#include "cutils/ashmem.h"
+#include "linux/ashmem.h"
+
+#define DBG(format, ...) fprintf(stderr, format "\n", __VA_ARGS__)
+
+#ifndef TEMP_FAILURE_RETRY
+/* Used to retry syscalls that can return EINTR. */
+#define TEMP_FAILURE_RETRY(exp) ({         \
+    typeof (exp) _rc;                      \
+    do {                                   \
+        _rc = (exp);                       \
+    } while (_rc == -1 && errno == EINTR); \
+    _rc; })
+#endif /* TEMP_FAILURE_RETRY */
+#endif
 
 #include "shm.h"
 
-#define DBG(...) __android_log_print(ANDROID_LOG_INFO, "shmem", __VA_ARGS__)
 #define ASHV_KEY_SYMLINK_PATH _PATH_TMP "ashv_key_%d"
 #define ANDROID_SHMEM_SOCKNAME "/dev/shm/%08x"
 #define ROUND_UP(N, S) ((((N) + (S) - 1) / (S)) * (S))
@@ -105,7 +127,7 @@ static int ancil_recv_fd(int sock)
 	return ((int*) CMSG_DATA(cmsg))[0];
 }
 
-static int ashmem_get_size_region(int fd)
+int ashmem_get_size_region(int fd)
 {
 	//int ret = __ashmem_is_ashmem(fd, 1);
 	//if (ret < 0) return ret;
@@ -121,7 +143,7 @@ static int ashmem_get_size_region(int fd)
  * `name' is the label to give the region (visible in /proc/pid/maps)
  * `size' is the size of the region, in page-aligned bytes
  */
-static int ashmem_create_region(char const* name, size_t size)
+int ashmem_create_region(char const* name, size_t size)
 {
 	int fd = open("/dev/ashmem", O_RDWR);
 	if (fd < 0) return fd;
